@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { SCALE_LABELS, type AppConfig, type OpenSession } from '../supabase';
 import { liveApi, type FlowApi } from './api';
 
-type Step = 'identify' | 'register' | 'select' | 'rate' | 'thanks';
+type Step = 'identify' | 'register' | 'select' | 'rate' | 'thanks' | 'blocked';
 
 const REMEMBER_KEY = 'nn-feedback-identity';
 
@@ -83,6 +83,7 @@ export default function FeedbackFlow({ config, api = liveApi }: { config: AppCon
     try {
       const res = await api.checkParticipant(contact);
       if (!res.valid) return setError('Enter a valid mobile number or email.');
+      if (res.disabled) return setStep('blocked');
       persistIdentity();
       if (res.registered) {
         const known = config.cohorts.find((c) => c.id === res.cohort_id);
@@ -196,6 +197,17 @@ export default function FeedbackFlow({ config, api = liveApi }: { config: AppCon
             {busy ? 'Checking…' : 'Continue'}
           </button>
         </form>
+      )}
+
+      {step === 'blocked' && (
+        <section className="card center" role="status">
+          <div className="big-check blocked" aria-hidden="true">!</div>
+          <h2>Access disabled</h2>
+          <p>Your access to give feedback is currently disabled. Please contact your instructor.</p>
+          <button type="button" className="btn" onClick={() => setStep('identify')}>
+            Use a different mobile number or email
+          </button>
+        </section>
       )}
 
       {step === 'register' && (
