@@ -469,3 +469,17 @@ select:disabled { background: var(--bg); color: var(--muted); }
 .dt-table th { overflow-wrap: normal; word-break: normal; hyphens: auto; -webkit-hyphens: auto; }
 .dt-head-label { overflow-wrap: break-word; hyphens: auto; -webkit-hyphens: auto; }
 .chart-grid { align-items: start; }
+.dt-expanded td { background: var(--bg); padding: 12px 14px !important; }
+.dt-table tbody tr.dt-expanded:hover td { background: var(--bg); }
+.dt-table tr.inactive-row td { background: var(--bg); }
+.dt-table td input:not([type=checkbox]), .dt-table td select { min-height: 38px; padding: 6px 8px; width: 100%; min-width: 0; }
+.dt-table td .cell-textarea { width: 100%; min-width: 0; }
+.dt-compact td input:not([type=checkbox]) { min-height: 32px; padding: 4px 6px; }
+.notice-warn { color: var(--warn); background: var(--warn-soft); padding: 10px 12px; border-radius: 10px; margin: 12px 0; font-weight: 700; }
+.notice-warn span { font-weight: 400; color: var(--text); }
+.check-field { display: flex; gap: 10px; align-items: flex-start; margin: 14px 0; }
+.check-field input { width: 22px; height: 22px; min-height: 0; margin: 2px 0 0; flex: none; accent-color: var(--action); }
+.check-field strong { display: block; }
+.history-wrap h4 { margin: 0 0 8px; font-size: .95rem; }
+.empty p { margin: 0 0 6px; }
+.empty ul { margin: 6px 0 0; padding-left: 20px; }

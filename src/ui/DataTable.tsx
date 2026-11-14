@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { exportCsv, exportExcel, type CellValue } from './exporters';
 import type { TableLayout, ViewStore } from './useSavedViews';
 
@@ -43,6 +43,11 @@ interface Props<T> {
   emptyText?: string;
   viewStore?: ViewStore;
   toolbarExtra?: ReactNode;
+  /** Optional detail row under a row (e.g. a question's history). */
+  expandedKey?: string | number | null;
+  renderExpanded?: (row: T) => ReactNode;
+  /** Optional class per row (e.g. 'inactive-row'). */
+  rowClassName?: (row: T) => string;
 }
 
 const MIN_W = 64;
@@ -106,6 +111,7 @@ function compare(a: CellValue, b: CellValue): number {
 
 export default function DataTable<T>({
   tableKey, columns, rows, rowKey, exportName, caption, emptyText = 'No rows.', viewStore, toolbarExtra,
+  expandedKey, renderExpanded, rowClassName,
 }: Props<T>) {
   const [layout, setLayout] = useState<TableLayout>(() => reconcile(readLocal(tableKey), columns));
   const [panelOpen, setPanelOpen] = useState(false);
@@ -437,15 +443,26 @@ export default function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((r) => (
-              <tr key={rowKey(r)}>
-                {visible.map((c) => (
-                  <td key={c.id} className={`align-${c.align ?? 'left'}`}>
-                    {c.render ? c.render(r) : formatValue(c.value(r))}
-                  </td>
-                ))}
-              </tr>
-            ))}
+            {sorted.map((r) => {
+              const k = rowKey(r);
+              const open = renderExpanded && expandedKey != null && expandedKey === k;
+              return (
+                <Fragment key={k}>
+                  <tr className={rowClassName?.(r) ?? ''}>
+                    {visible.map((c) => (
+                      <td key={c.id} className={`align-${c.align ?? 'left'}`}>
+                        {c.render ? c.render(r) : formatValue(c.value(r))}
+                      </td>
+                    ))}
+                  </tr>
+                  {open && (
+                    <tr className="dt-expanded">
+                      <td colSpan={visible.length}>{renderExpanded!(r)}</td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
             {!sorted.length && (
               <tr>
                 <td colSpan={visible.length} className="dt-empty-row">{emptyText}</td>

@@ -261,7 +261,14 @@ export default function FeedbackFlow({ config, api = liveApi }: { config: AppCon
           {cohortId == null && <p className="empty">No courses are open for feedback right now.</p>}
           {cohortId != null && sessions == null && !error && <p className="muted">Loading sessions…</p>}
           {sessions && sessions.length === 0 && (
-            <p className="empty">No sessions are open for feedback in {cohortLabel(cohortId)} right now.</p>
+            <div className="empty" role="status">
+              <p><strong>No sessions are open for feedback in {cohortLabel(cohortId)} right now.</strong></p>
+              <p>Sessions appear here once your instructor opens them for feedback — usually at the end of the session.</p>
+              <ul>
+                <li>If your instructor has just opened it, tap <strong>Refresh</strong> at the top of the page.</li>
+                {config.cohorts.length > 1 && <li>Taking another course? Choose it in <strong>Course / cohort</strong> above.</li>}
+              </ul>
+            </div>
           )}
           <ul className="session-list">
             {sessions?.map((x) => (
