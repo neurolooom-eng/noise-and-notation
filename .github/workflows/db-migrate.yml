@@ -1,0 +1,39 @@
+name: Apply Supabase migrations
+
+# Runs the SQL in supabase/migrations against your Supabase Postgres.
+# Requires repository secret SUPABASE_DB_URL (Supabase → Connect → "Session pooler" URI).
+# The migration is idempotent, so re-running is safe.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['supabase/migrations/**']
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip when SUPABASE_DB_URL is not configured
+        id: guard
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "::warning::SUPABASE_DB_URL secret not set — skipping. Run the SQL manually in the Supabase SQL editor instead."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install psql
+        if: steps.guard.outputs.skip != 'true'
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+
+      - name: Apply migrations
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          for f in supabase/migrations/*.sql; do
+            echo "Applying $f"
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
