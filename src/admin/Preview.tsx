@@ -4,7 +4,7 @@ import { supabase, friendlyError, type AppConfig, type OpenSession } from '../su
 import FeedbackFlow from '../participant/FeedbackFlow';
 import type { FlowApi } from '../participant/api';
 
-type Persona = 'new' | 'returning';
+type Persona = 'new' | 'returning' | 'disabled';
 
 interface CohortRow { id: number; course_name: string; cohort: string; active: boolean }
 interface SessionRow {
@@ -58,7 +58,8 @@ export default function Preview() {
       preview: true,
       checkParticipant: async () => ({
         valid: true,
-        registered: persona === 'returning',
+        registered: persona !== 'new',
+        disabled: persona === 'disabled',
         cohort_id: config?.cohorts[0]?.id ?? null,
       }),
       register: async () => {
@@ -112,6 +113,7 @@ export default function Preview() {
               >
                 <option value="new">New participant (shows registration)</option>
                 <option value="returning">Returning participant (skips registration)</option>
+                <option value="disabled">Disabled participant (access blocked)</option>
               </select>
             </label>
             <button type="button" className="btn small-btn" onClick={() => setRunKey((k) => k + 1)}>Restart</button>

@@ -7,7 +7,7 @@ import { supabase, friendlyError, type Answer, type OpenSession } from '../supab
  */
 export interface FlowApi {
   preview: boolean;
-  checkParticipant(contact: string): Promise<{ valid: boolean; registered: boolean; cohort_id: number | null }>;
+  checkParticipant(contact: string): Promise<{ valid: boolean; registered: boolean; cohort_id: number | null; disabled?: boolean }>;
   register(name: string, contact: string, cohortId: number, consent: boolean): Promise<void>;
   listSessions(contact: string, cohortId: number): Promise<OpenSession[]>;
   submit(contact: string, sessionId: number, answers: Answer[], comment: string): Promise<void>;

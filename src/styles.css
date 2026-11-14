@@ -484,3 +484,4 @@ select:disabled { background: var(--bg); color: var(--muted); }
 .empty p { margin: 0 0 6px; }
 .empty ul { margin: 6px 0 0; padding-left: 20px; }
 .reveal-toggle { margin: 0; align-self: center; padding-top: 18px; }
+.big-check.blocked { background: var(--warn-soft); color: var(--warn); }
