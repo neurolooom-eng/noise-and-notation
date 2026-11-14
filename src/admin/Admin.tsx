@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase, friendlyError } from '../supabase';
-import FeedbackTab from './FeedbackTab';
+import FeedbackTab, { DEFAULT_FILTERS, type FeedbackFilters } from './FeedbackTab';
 import DesignTab from './DesignTab';
 import ParticipantsTab from './ParticipantsTab';
 import DataTable, { type Column } from '../ui/DataTable';
 import { useSavedViews } from '../ui/useSavedViews';
 import { FilterBar, Field, FormActions } from '../ui/Form';
 
-type Tab = 'feedback' | 'summary' | 'sessions' | 'courses' | 'participants' | 'questions' | 'settings' | 'design';
+type Tab = 'insights' | 'feedback' | 'summary' | 'sessions' | 'courses' | 'participants' | 'questions' | 'settings' | 'design';
 
 interface CohortRow { id: number; course_name: string; cohort: string; active: boolean }
 interface SessionRow {
@@ -100,7 +100,8 @@ function Login() {
 }
 
 function Console({ email }: { email: string }) {
-  const [tab, setTab] = useState<Tab>('feedback');
+  const [tab, setTab] = useState<Tab>('insights');
+  const [fbFilters, setFbFilters] = useState<FeedbackFilters>(DEFAULT_FILTERS);
   const [cohorts, setCohorts] = useState<CohortRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isSuper, setIsSuper] = useState(false);
@@ -114,7 +115,7 @@ function Console({ email }: { email: string }) {
   useEffect(() => { loadCohorts(); }, [loadCohorts]);
 
   const tabs: [Tab, string][] = [
-    ['feedback', 'Feedback & insights'], ['summary', 'Summary'], ['sessions', 'Sessions'], ['courses', 'Courses'],
+    ['insights', 'Insights'], ['feedback', 'Feedback'], ['summary', 'Summary'], ['sessions', 'Sessions'], ['courses', 'Courses'],
     ...(isSuper ? [['participants', 'Participants'] as [Tab, string]] : []),
     ['questions', 'Questions'], ['settings', 'Settings'], ['design', 'Design'],
   ];
@@ -136,7 +137,9 @@ function Console({ email }: { email: string }) {
         ))}
       </nav>
       {error && <p className="error">{error}</p>}
-      {tab === 'feedback' && <FeedbackTab />}
+      {(tab === 'insights' || tab === 'feedback') && (
+        <FeedbackTab key={tab} view={tab} filters={fbFilters} onFilters={setFbFilters} onNavigate={(t) => setTab(t)} />
+      )}
       {tab === 'summary' && <SummaryTab cohorts={cohorts} />}
       {tab === 'sessions' && <SessionsTab cohorts={cohorts} />}
       {tab === 'courses' && <CoursesTab cohorts={cohorts} reload={loadCohorts} />}
@@ -255,7 +258,7 @@ function SummaryTab({ cohorts }: { cohorts: CohortRow[] }) {
       <p className="muted small">
         Averages appear once there are at least {minN} answers (change in Settings). Each question version has its own
         column, so results are only compared on identical wording. Hover a column heading for the exact statement.
-        Comments are in the Feedback &amp; insights tab.
+        Comments are in the Feedback tab.
       </p>
       <h2>Per session</h2>
       <DataTable tableKey="summary-sessions" caption="Summary per session" columns={sessionColumns} rows={sessions}

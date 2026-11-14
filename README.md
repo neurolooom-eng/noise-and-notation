@@ -75,10 +75,12 @@ build uses relative paths, so it works either way.
 
 ## Routine use (no code changes)
 In **Admin** (`#/admin`):
-- **Feedback & insights** (opens first): filters (course, session, period) scope everything; headline
-  numbers; rule-based insights (strongest/weakest question, items needing attention, session trend,
-  lowest-rated session, comments); an agree/disagree chart per question; average-by-session trend; and
-  the full feedback table. Values below the minimum responses are never shown.
+- **Insights** (opens first): filters (course, session, period); headline numbers; rule-based insights
+  (strongest/weakest question, items needing attention, session trend, lowest-rated session, comments);
+  an agree/disagree chart per question; average-by-session trend. Values below the minimum responses are
+  never shown.
+- **Feedback**: the full table of individual responses and comments, with the same filters. Filters are
+  shared, so a course picked on Insights is still selected when you open Feedback (and back).
 - **Tables** everywhere: resize columns, drag to reorder, choose columns, save named views (per admin),
   Comfortable/Compact density, sort, and export to **CSV or Excel**. See `docs/design-system.md` or the
   **Design** tab for the table, form and chart defaults.
