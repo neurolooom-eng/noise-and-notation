@@ -369,9 +369,7 @@ export default function FeedbackFlow({ config }: { config: AppConfig }) {
         </section>
       )}
 
-      <footer className="footer muted small">
-        Your name and contact never appear in any report.
-      </footer>
+      <p className="footer muted small">Your name and contact never appear in any report.</p>
     </main>
   );
 }

@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import FeedbackFlow from './participant/FeedbackFlow';
 import { supabase, configError, friendlyError, type AppConfig } from './supabase';
-import RefreshButton, { cleanRefreshParam } from './RefreshButton';
+import { cleanRefreshParam } from './RefreshButton';
+import BrandHeader, { BrandFooter, ORG_NAME } from './BrandHeader';
 
 cleanRefreshParam();
 
@@ -20,10 +21,9 @@ function useHashRoute() {
 export default function App() {
   return (
     <>
-      <div className="topbar">
-        <RefreshButton />
-      </div>
+      <BrandHeader />
       <Routes />
+      <BrandFooter />
     </>
   );
 }
@@ -51,7 +51,7 @@ function Participant() {
       else {
         const cfg = data as AppConfig;
         setConfig(cfg);
-        if (cfg.settings?.app_title) document.title = cfg.settings.app_title;
+        if (cfg.settings?.app_title) document.title = `${cfg.settings.app_title} · ${ORG_NAME}`;
       }
     });
   }, []);
