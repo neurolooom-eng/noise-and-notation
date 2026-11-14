@@ -26,16 +26,31 @@ const is5 = (c: VersionRow) => c.scale_min === 1 && c.scale_max === 5;
 type Tone = 'good' | 'warning' | 'info';
 interface Insight { tone: Tone; title: string; detail: string }
 
-export default function FeedbackTab() {
+export interface FeedbackFilters { cohortId: string; sessionId: string; range: string }
+export const DEFAULT_FILTERS: FeedbackFilters = { cohortId: 'all', sessionId: 'all', range: 'all' };
+
+/**
+ * Two pages share this data layer and the same filters (kept by the parent, so a
+ * selection carries over when you switch between Insights and Feedback):
+ *  - view="insights": KPI tiles, insights, charts
+ *  - view="feedback": the full feedback table
+ */
+export default function FeedbackTab({ view, filters, onFilters, onNavigate }: {
+  view: 'insights' | 'feedback';
+  filters: FeedbackFilters;
+  onFilters: (f: FeedbackFilters) => void;
+  onNavigate?: (to: 'insights' | 'feedback') => void;
+}) {
   const [rows, setRows] = useState<FeedbackRow[] | null>(null);
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [cohorts, setCohorts] = useState<CohortRow[]>([]);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [minN, setMinN] = useState(5);
   const [error, setError] = useState<string | null>(null);
-  const [cohortId, setCohortId] = useState<string>('all');
-  const [sessionId, setSessionId] = useState<string>('all');
-  const [range, setRange] = useState('all');
+  const { cohortId, sessionId, range } = filters;
+  const setCohortId = (v: string) => onFilters({ ...filters, cohortId: v, sessionId: 'all' });
+  const setSessionId = (v: string) => onFilters({ ...filters, sessionId: v });
+  const setRange = (v: string) => onFilters({ ...filters, range: v });
   const viewStore = useSavedViews('feedback');
 
   useEffect(() => {
@@ -212,9 +227,9 @@ export default function FeedbackTab() {
 
   return (
     <section className="feedback-tab">
-      <FilterBar label="Feedback filters">
+      <FilterBar label={view === 'insights' ? 'Insights filters' : 'Feedback filters'}>
         <Field label="Course / cohort" inline>
-          <select value={cohortId} onChange={(e) => { setCohortId(e.target.value); setSessionId('all'); }}>
+          <select value={cohortId} onChange={(e) => setCohortId(e.target.value)}>
             <option value="all">All courses</option>
             {cohorts.map((c) => <option key={c.id} value={c.id}>{c.course_name} — {c.cohort}</option>)}
           </select>
@@ -232,6 +247,7 @@ export default function FeedbackTab() {
         </Field>
       </FilterBar>
 
+      {view === 'insights' && (<>
       <KpiRow>
         <StatTile label="Responses" value={N.toLocaleString()} sub={`${sessionsInView} session${sessionsInView === 1 ? '' : 's'}`} />
         <StatTile label="Average rating" value={enough && mean != null ? fmt(mean) : '—'}
@@ -280,6 +296,17 @@ export default function FeedbackTab() {
         </ChartCard>
       </div>
 
+      <p className="muted small">
+        Want the individual responses and comments?{' '}
+        <button type="button" className="link" onClick={() => onNavigate?.('feedback')}>Open the Feedback page</button> — same filters.
+      </p>
+      </>)}
+
+      {view === 'feedback' && (<>
+      <KpiRow>
+        <StatTile label="Responses" value={N.toLocaleString()} sub={`${sessionsInView} session${sessionsInView === 1 ? '' : 's'}`} />
+        <StatTile label="Comments" value={comments.toLocaleString()} sub={N ? `${pct(comments / N)} of responses` : 'no responses'} />
+      </KpiRow>
       <h2>All feedback</h2>
       <p className="muted small">
         One row per response. No names or contacts are shown; the participant code is hidden by default.
@@ -295,6 +322,11 @@ export default function FeedbackTab() {
         emptyText="No feedback matches these filters."
         viewStore={viewStore}
       />
+      <p className="muted small">
+        Looking for averages, charts and what stands out?{' '}
+        <button type="button" className="link" onClick={() => onNavigate?.('insights')}>Open the Insights page</button> — same filters.
+      </p>
+      </>)}
     </section>
   );
 }
