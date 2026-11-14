@@ -86,6 +86,9 @@ In **Admin** (`#/admin`):
 - **Sessions**: add sessions, enter the topic shown to participants, and toggle **Open/Closed**.
 - **Summary**: see per-session averages Q1–Q6, response counts and anonymous comments, compare across
   cohorts, and export a CSV.
+- **Participants** (super admins only): code, name, contact (masked until you tick *Show contacts*),
+  course, feedback given, last feedback, registered date; search and filter by course. Plain admins
+  cannot read this list (enforced in the database).
 - **Questions**: add new questions, edit them, reorder them (↑ ↓) or set them **inactive** (hidden from the
   form, answers kept). **Any** change creates a new version of that question automatically; every answer
   stores the version it was answered under, the summary shows each version as its own column, and
