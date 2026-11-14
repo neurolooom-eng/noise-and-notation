@@ -3,11 +3,12 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase, friendlyError } from '../supabase';
 import FeedbackTab from './FeedbackTab';
 import DesignTab from './DesignTab';
+import ParticipantsTab from './ParticipantsTab';
 import DataTable, { type Column } from '../ui/DataTable';
 import { useSavedViews } from '../ui/useSavedViews';
 import { FilterBar, Field, FormActions } from '../ui/Form';
 
-type Tab = 'feedback' | 'summary' | 'sessions' | 'courses' | 'questions' | 'settings' | 'design';
+type Tab = 'feedback' | 'summary' | 'sessions' | 'courses' | 'participants' | 'questions' | 'settings' | 'design';
 
 interface CohortRow { id: number; course_name: string; cohort: string; active: boolean }
 interface SessionRow {
@@ -114,6 +115,7 @@ function Console({ email }: { email: string }) {
 
   const tabs: [Tab, string][] = [
     ['feedback', 'Feedback & insights'], ['summary', 'Summary'], ['sessions', 'Sessions'], ['courses', 'Courses'],
+    ...(isSuper ? [['participants', 'Participants'] as [Tab, string]] : []),
     ['questions', 'Questions'], ['settings', 'Settings'], ['design', 'Design'],
   ];
 
@@ -139,6 +141,7 @@ function Console({ email }: { email: string }) {
       {tab === 'sessions' && <SessionsTab cohorts={cohorts} />}
       {tab === 'courses' && <CoursesTab cohorts={cohorts} reload={loadCohorts} />}
       {tab === 'questions' && <QuestionsTab />}
+      {tab === 'participants' && isSuper && <ParticipantsTab />}
       {tab === 'settings' && <SettingsTab />}
       {tab === 'design' && <DesignTab />}
     </main>
