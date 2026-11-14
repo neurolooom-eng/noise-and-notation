@@ -7,6 +7,7 @@ import BrandHeader, { BrandFooter, ORG_NAME } from './BrandHeader';
 cleanRefreshParam();
 
 const Admin = lazy(() => import('./admin/Admin'));
+const Preview = lazy(() => import('./admin/Preview'));
 
 function useHashRoute() {
   const [hash, setHash] = useState(window.location.hash);
@@ -31,6 +32,13 @@ export default function App() {
 function Routes() {
   const hash = useHashRoute();
   if (configError) return <Message title="Not configured" text={configError} />;
+  if (hash.startsWith('#/preview')) {
+    return (
+      <Suspense fallback={<Message text="Loading…" />}>
+        <Preview />
+      </Suspense>
+    );
+  }
   if (hash.startsWith('#/admin')) {
     return (
       <Suspense fallback={<Message text="Loading…" />}>

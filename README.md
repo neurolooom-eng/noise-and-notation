@@ -35,12 +35,14 @@ its version), and merging of duplicate participants (`merge_participants`).
 
 ### 1. Create the database objects
 In the Supabase dashboard, open **SQL Editor** and run
-[`supabase/migrations/0001_feedback_app.sql`](supabase/migrations/0001_feedback_app.sql). The script is
-safe to re-run. You can also run [`supabase/seed_sample.sql`](supabase/seed_sample.sql) to add sample
+[`supabase/migrations/0001_feedback_app.sql`](supabase/migrations/0001_feedback_app.sql). You can also run [`supabase/seed_sample.sql`](supabase/seed_sample.sql) to add sample
 courses and sessions.
 
+Then run the other files in `supabase/migrations/` in order (`0002_…`, `0003_…`). Each file is applied once;
+applied files are recorded in `public.schema_migrations`.
+
 *Optional, automated:* add a repository secret `SUPABASE_DB_URL` (Supabase → **Connect** → Session pooler
-connection string, with your DB password). The **Apply Supabase migrations** workflow then runs the SQL
+connection string, with your DB password). The **Apply Supabase migrations** workflow then applies any new migration files
 whenever `supabase/migrations/**` changes on `main`, or when you start it manually.
 
 ### 2. Create the owner (admin) login
@@ -77,8 +79,14 @@ In **Admin** (`#/admin`):
 - **Sessions**: add sessions, enter the topic shown to participants, and toggle **Open/Closed**.
 - **Summary**: see per-session averages Q1–Q6, response counts and anonymous comments, compare across
   cohorts, and export a CSV.
-- **Questions**: edit wording. Each edit bumps the question-set version, and the summary splits rows by
-  version.
+- **Questions**: add new questions, edit them, reorder them (↑ ↓) or set them **inactive** (hidden from the
+  form, answers kept). **Any** change creates a new version of that question automatically; every answer
+  stores the version it was answered under, the summary shows each version as its own column, and
+  **History** shows the exact wording of every version and who changed it. Questions that have answers
+  can't be deleted, so set them inactive instead.
+- **👁 View as participant** (super admins): opens the real participant screens in PREVIEW mode. It lists
+  every course and session (including inactive and closed ones), lets you simulate a new or returning
+  participant, and saves nothing.
 - **Settings**: change the app title, privacy text, minimum responses, and merge duplicate participant
   codes.
 
