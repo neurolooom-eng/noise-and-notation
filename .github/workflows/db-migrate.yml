@@ -2,7 +2,7 @@ name: Apply Supabase migrations
 
 # Runs the SQL in supabase/migrations against your Supabase Postgres.
 # Requires repository secret SUPABASE_DB_URL (Supabase → Connect → "Session pooler" URI).
-# The migration is idempotent, so re-running is safe.
+# Each file is applied once; applied files are recorded in public.schema_migrations.
 
 on:
   workflow_dispatch:
@@ -30,10 +30,19 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
 
-      - name: Apply migrations
+      - name: Apply new migrations (each file once, tracked in public.schema_migrations)
         if: steps.guard.outputs.skip != 'true'
         run: |
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -q -c \
+            "create table if not exists public.schema_migrations (filename text primary key, applied_at timestamptz not null default now())"
           for f in supabase/migrations/*.sql; do
-            echo "Applying $f"
-            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -q -f "$f"
+            name=$(basename "$f")
+            if [ "$(psql "$SUPABASE_DB_URL" -tAc "select 1 from public.schema_migrations where filename = '$name'")" = "1" ]; then
+              echo "Skipping $name (already applied)"
+              continue
+            fi
+            echo "Applying $name"
+            psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -q --single-transaction \
+              -f "$f" \
+              -c "insert into public.schema_migrations (filename) values ('$name') on conflict do nothing"
           done

@@ -1,8 +1,13 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import FeedbackFlow from './participant/FeedbackFlow';
 import { supabase, configError, friendlyError, type AppConfig } from './supabase';
+import { cleanRefreshParam } from './RefreshButton';
+import BrandHeader, { BrandFooter, ORG_NAME } from './BrandHeader';
+
+cleanRefreshParam();
 
 const Admin = lazy(() => import('./admin/Admin'));
+const Preview = lazy(() => import('./admin/Preview'));
 
 function useHashRoute() {
   const [hash, setHash] = useState(window.location.hash);
@@ -15,8 +20,25 @@ function useHashRoute() {
 }
 
 export default function App() {
+  return (
+    <>
+      <BrandHeader />
+      <Routes />
+      <BrandFooter />
+    </>
+  );
+}
+
+function Routes() {
   const hash = useHashRoute();
   if (configError) return <Message title="Not configured" text={configError} />;
+  if (hash.startsWith('#/preview')) {
+    return (
+      <Suspense fallback={<Message text="Loading…" />}>
+        <Preview />
+      </Suspense>
+    );
+  }
   if (hash.startsWith('#/admin')) {
     return (
       <Suspense fallback={<Message text="Loading…" />}>
@@ -37,7 +59,7 @@ function Participant() {
       else {
         const cfg = data as AppConfig;
         setConfig(cfg);
-        if (cfg.settings?.app_title) document.title = cfg.settings.app_title;
+        if (cfg.settings?.app_title) document.title = `${cfg.settings.app_title} · ${ORG_NAME}`;
       }
     });
   }, []);

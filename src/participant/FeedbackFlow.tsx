@@ -1,11 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  supabase,
-  friendlyError,
-  SCALE_LABELS,
-  type AppConfig,
-  type OpenSession,
-} from '../supabase';
+import { SCALE_LABELS, type AppConfig, type OpenSession } from '../supabase';
+import { liveApi, type FlowApi } from './api';
 
 type Step = 'identify' | 'register' | 'select' | 'rate' | 'thanks';
 
@@ -30,9 +25,11 @@ function readRemembered(): { name: string; contact: string } | null {
   }
 }
 
-export default function FeedbackFlow({ config }: { config: AppConfig }) {
+const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong. Please try again.');
+
+export default function FeedbackFlow({ config, api = liveApi }: { config: AppConfig; api?: FlowApi }) {
   const s = config.settings;
-  const remembered = useMemo(readRemembered, []);
+  const remembered = useMemo(() => (api.preview ? null : readRemembered()), [api.preview]);
 
   const [step, setStep] = useState<Step>('identify');
   const [name, setName] = useState(remembered?.name ?? '');
@@ -42,6 +39,7 @@ export default function FeedbackFlow({ config }: { config: AppConfig }) {
   const [consent, setConsent] = useState(false);
   const [sessions, setSessions] = useState<OpenSession[] | null>(null);
   const [session, setSession] = useState<OpenSession | null>(null);
+  /** question id -> rating */
   const [ratings, setRatings] = useState<Record<number, number>>({});
   const [comment, setComment] = useState('');
   const [busy, setBusy] = useState(false);
@@ -52,24 +50,22 @@ export default function FeedbackFlow({ config }: { config: AppConfig }) {
     setError(null);
   }, [step]);
 
-  // Load open sessions whenever the chosen cohort changes on the select step.
+  // Load sessions whenever the chosen cohort changes on the select step.
   useEffect(() => {
     if (step !== 'select' || cohortId == null) return;
     let cancelled = false;
     setSessions(null);
-    supabase
-      .rpc('list_open_sessions', { p_contact: contact, p_cohort_id: cohortId })
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error) setError(friendlyError(error));
-        else setSessions((data as OpenSession[]) ?? []);
-      });
+    api
+      .listSessions(contact, cohortId)
+      .then((list) => !cancelled && setSessions(list))
+      .catch((e) => !cancelled && setError(errMsg(e)));
     return () => {
       cancelled = true;
     };
-  }, [step, cohortId, contact]);
+  }, [step, cohortId, contact, api]);
 
   function persistIdentity() {
+    if (api.preview) return; // never store anything from a preview
     try {
       if (remember) localStorage.setItem(REMEMBER_KEY, JSON.stringify({ name: name.trim(), contact: contact.trim() }));
       else localStorage.removeItem(REMEMBER_KEY);
@@ -84,19 +80,22 @@ export default function FeedbackFlow({ config }: { config: AppConfig }) {
     const cErr = validateContact(contact);
     if (cErr) return setError(cErr);
     setBusy(true);
-    const { data, error } = await supabase.rpc('check_participant', { p_contact: contact });
-    setBusy(false);
-    if (error) return setError(friendlyError(error));
-    const res = data as { valid: boolean; registered: boolean; cohort_id: number | null };
-    if (!res.valid) return setError('Enter a valid mobile number or email.');
-    persistIdentity();
-    if (res.registered) {
-      const known = config.cohorts.find((c) => c.id === res.cohort_id);
-      setCohortId(known ? known.id : config.cohorts[0]?.id ?? null);
-      setStep('select');
-    } else {
-      setCohortId(config.cohorts.length === 1 ? config.cohorts[0].id : null);
-      setStep('register');
+    try {
+      const res = await api.checkParticipant(contact);
+      if (!res.valid) return setError('Enter a valid mobile number or email.');
+      persistIdentity();
+      if (res.registered) {
+        const known = config.cohorts.find((c) => c.id === res.cohort_id);
+        setCohortId(known ? known.id : config.cohorts[0]?.id ?? null);
+        setStep('select');
+      } else {
+        setCohortId(config.cohorts.length === 1 ? config.cohorts[0].id : null);
+        setStep('register');
+      }
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -105,15 +104,14 @@ export default function FeedbackFlow({ config }: { config: AppConfig }) {
     if (cohortId == null) return setError('Please choose your course / cohort.');
     if (!consent) return setError('Please tick the consent box to continue.');
     setBusy(true);
-    const { error } = await supabase.rpc('register_participant', {
-      p_name: name,
-      p_contact: contact,
-      p_cohort_id: cohortId,
-      p_consent: consent,
-    });
-    setBusy(false);
-    if (error) return setError(friendlyError(error));
-    setStep('select');
+    try {
+      await api.register(name, contact, cohortId, consent);
+      setStep('select');
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   function chooseSession(sess: OpenSession) {
@@ -126,28 +124,27 @@ export default function FeedbackFlow({ config }: { config: AppConfig }) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!session) return;
-    const missing = config.questions.filter((q) => !ratings[q.position]);
+    const missing = config.questions.filter((q) => ratings[q.id] == null);
     if (missing.length) {
       setError(`Please rate every statement (${missing.length} left).`);
-      document.getElementById(`q-${missing[0].position}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      document.getElementById(`q-${missing[0].id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
-    const arr = [1, 2, 3, 4, 5, 6].map((p) => ratings[p] ?? null);
+    const answers = config.questions.map((q) => ({ question_id: q.id, version: q.version, rating: ratings[q.id] }));
     setBusy(true);
-    const { error } = await supabase.rpc('submit_feedback', {
-      p_contact: contact,
-      p_session_id: session.id,
-      p_ratings: arr,
-      p_comment: comment,
-    });
-    setBusy(false);
-    if (error) return setError(friendlyError(error));
-    setStep('thanks');
+    try {
+      await api.submit(contact, session.id, answers, comment);
+      setStep('thanks');
+    } catch (err) {
+      setError(errMsg(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   function notMe() {
     try {
-      localStorage.removeItem(REMEMBER_KEY);
+      if (!api.preview) localStorage.removeItem(REMEMBER_KEY);
     } catch {
       /* ignore */
     }
@@ -162,7 +159,7 @@ export default function FeedbackFlow({ config }: { config: AppConfig }) {
     return c ? `${c.course_name} — ${c.cohort}` : '';
   };
 
-  const answered = Object.keys(ratings).length;
+  const answered = config.questions.filter((q) => ratings[q.id] != null).length;
   const total = config.questions.length;
 
   return (
@@ -269,7 +266,7 @@ export default function FeedbackFlow({ config }: { config: AppConfig }) {
           <ul className="session-list">
             {sessions?.map((x) => (
               <li key={x.id}>
-                <button className="session" disabled={x.already_submitted} onClick={() => chooseSession(x)}>
+                <button className="session" disabled={x.already_submitted && !api.preview} onClick={() => chooseSession(x)}>
                   <span className="session-num">#{x.session_number}</span>
                   <span className="session-body">
                     <strong>{x.title}</strong>
@@ -278,6 +275,7 @@ export default function FeedbackFlow({ config }: { config: AppConfig }) {
                   </span>
                   <span className={x.already_submitted ? 'tag done' : 'tag'}>
                     {x.already_submitted ? 'Submitted ✓' : 'Give feedback →'}
+                    {x.feedback_open === false && <span className="pill closed">Closed — preview only</span>}
                   </span>
                 </button>
               </li>
@@ -295,12 +293,10 @@ export default function FeedbackFlow({ config }: { config: AppConfig }) {
             <h2>{session.title}</h2>
             {session.topic && <p className="topic">{session.topic}</p>}
           </div>
-          <p className="muted small">
-            Rate each statement: 1 = Strongly disagree, 5 = Strongly agree.
-          </p>
+          <p className="muted small">Rate each statement from Strongly disagree to Strongly agree.</p>
           <ol className="questions">
             {config.questions.map((q) => (
-              <li key={q.position} id={`q-${q.position}`} className={ratings[q.position] ? 'answered' : ''}>
+              <li key={q.id} id={`q-${q.id}`} className={ratings[q.id] != null ? 'answered' : ''}>
                 <fieldset>
                   <legend>
                     <span className="dimension">{q.dimension}</span>
@@ -308,13 +304,13 @@ export default function FeedbackFlow({ config }: { config: AppConfig }) {
                   </legend>
                   <div className="scale" role="radiogroup">
                     {range(q.scale_min, q.scale_max).map((v) => (
-                      <label key={v} className={ratings[q.position] === v ? 'pt selected' : 'pt'} title={SCALE_LABELS[v]}>
+                      <label key={v} className={ratings[q.id] === v ? 'pt selected' : 'pt'} title={SCALE_LABELS[v]}>
                         <input
                           type="radio"
-                          name={`q${q.position}`}
+                          name={`q${q.id}`}
                           value={v}
-                          checked={ratings[q.position] === v}
-                          onChange={() => setRatings((r) => ({ ...r, [q.position]: v }))}
+                          checked={ratings[q.id] === v}
+                          onChange={() => setRatings((r) => ({ ...r, [q.id]: v }))}
                         />
                         <span>{v}</span>
                       </label>
@@ -355,7 +351,13 @@ export default function FeedbackFlow({ config }: { config: AppConfig }) {
         <section className="card center">
           <div className="big-check">✓</div>
           <h2>Thank you!</h2>
-          <p>Your feedback for <strong>{session?.title}</strong> has been recorded.</p>
+          {api.preview ? (
+            <p className="empty">
+              <strong>Preview:</strong> this is what participants see after submitting. Nothing was saved.
+            </p>
+          ) : (
+            <p>Your feedback for <strong>{session?.title}</strong> has been recorded.</p>
+          )}
           {session?.materials_url && (
             <p>
               <a href={session.materials_url} target="_blank" rel="noreferrer">
@@ -369,9 +371,7 @@ export default function FeedbackFlow({ config }: { config: AppConfig }) {
         </section>
       )}
 
-      <footer className="footer muted small">
-        Your name and contact never appear in any report.
-      </footer>
+      <p className="footer muted small">Your name and contact never appear in any report.</p>
     </main>
   );
 }

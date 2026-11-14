@@ -31,6 +31,8 @@ export interface Cohort {
 }
 
 export interface Question {
+  id: number;
+  version: number;
   position: number;
   dimension: string;
   statement: string;
@@ -52,6 +54,14 @@ export interface OpenSession {
   topic: string | null;
   materials_url: string | null;
   already_submitted: boolean;
+  /** Only set in admin preview, where closed sessions are listed too. */
+  feedback_open?: boolean;
+}
+
+export interface Answer {
+  question_id: number;
+  version: number;
+  rating: number;
 }
 
 export const SCALE_LABELS: Record<number, string> = {
