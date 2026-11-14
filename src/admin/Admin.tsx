@@ -1,8 +1,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase, friendlyError } from '../supabase';
+import FeedbackTab from './FeedbackTab';
+import DesignTab from './DesignTab';
+import DataTable, { type Column } from '../ui/DataTable';
+import { useSavedViews } from '../ui/useSavedViews';
+import { FilterBar, Field } from '../ui/Form';
 
-type Tab = 'summary' | 'sessions' | 'courses' | 'questions' | 'settings';
+type Tab = 'feedback' | 'summary' | 'sessions' | 'courses' | 'questions' | 'settings' | 'design';
 
 interface CohortRow { id: number; course_name: string; cohort: string; active: boolean }
 interface SessionRow {
@@ -27,7 +32,6 @@ interface QuestionAvgRow {
   position: number; dimension: string; statement: string;
   answer_count: number; average_visible: boolean; avg_rating: number | null;
 }
-interface CommentRow { session_id: number; submitted_at: string; comment: string }
 
 export default function Admin() {
   const [session, setSession] = useState<Session | null>(null);
@@ -95,7 +99,7 @@ function Login() {
 }
 
 function Console({ email }: { email: string }) {
-  const [tab, setTab] = useState<Tab>('summary');
+  const [tab, setTab] = useState<Tab>('feedback');
   const [cohorts, setCohorts] = useState<CohortRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isSuper, setIsSuper] = useState(false);
@@ -109,8 +113,8 @@ function Console({ email }: { email: string }) {
   useEffect(() => { loadCohorts(); }, [loadCohorts]);
 
   const tabs: [Tab, string][] = [
-    ['summary', 'Summary'], ['sessions', 'Sessions'], ['courses', 'Courses'],
-    ['questions', 'Questions'], ['settings', 'Settings'],
+    ['feedback', 'Feedback & insights'], ['summary', 'Summary'], ['sessions', 'Sessions'], ['courses', 'Courses'],
+    ['questions', 'Questions'], ['settings', 'Settings'], ['design', 'Design'],
   ];
 
   return (
@@ -124,17 +128,19 @@ function Console({ email }: { email: string }) {
           </span>
         </div>
       </header>
-      <nav className="tabs">
+      <nav className="tabs" aria-label="Admin sections">
         {tabs.map(([k, l]) => (
-          <button key={k} className={tab === k ? 'tab active' : 'tab'} onClick={() => setTab(k)}>{l}</button>
+          <button key={k} className={tab === k ? 'tab active' : 'tab'} aria-current={tab === k ? 'page' : undefined} onClick={() => setTab(k)}>{l}</button>
         ))}
       </nav>
       {error && <p className="error">{error}</p>}
+      {tab === 'feedback' && <FeedbackTab />}
       {tab === 'summary' && <SummaryTab cohorts={cohorts} />}
       {tab === 'sessions' && <SessionsTab cohorts={cohorts} />}
       {tab === 'courses' && <CoursesTab cohorts={cohorts} reload={loadCohorts} />}
       {tab === 'questions' && <QuestionsTab />}
       {tab === 'settings' && <SettingsTab />}
+      {tab === 'design' && <DesignTab />}
     </main>
   );
 }
@@ -162,8 +168,8 @@ function SummaryTab({ cohorts }: { cohorts: CohortRow[] }) {
   const [cohortRows, setCohortRows] = useState<CohortSummaryRow[]>([]);
   const [cohortQs, setCohortQs] = useState<QuestionAvgRow[]>([]);
   const [minN, setMinN] = useState(5);
-  const [openComments, setOpenComments] = useState<number | null>(null);
-  const [comments, setComments] = useState<CommentRow[]>([]);
+  const sessionViews = useSavedViews('summary-sessions');
+  const cohortViews = useSavedViews('summary-cohorts');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -194,105 +200,66 @@ function SummaryTab({ cohorts }: { cohorts: CohortRow[] }) {
   const cell = (rows: QuestionAvgRow[], id: number, field: 'session_id' | 'cohort_id', col: QCol) =>
     rows.find((r) => r[field] === id && r.question_id === col.question_id && r.question_version === col.version);
 
-  async function toggleComments(sessionId: number) {
-    if (openComments === sessionId) return setOpenComments(null);
-    const { data, error } = await supabase.from('session_comments').select('*').eq('session_id', sessionId).order('submitted_at');
-    if (error) return setError(friendlyError(error));
-    setComments(data as CommentRow[]);
-    setOpenComments(sessionId);
-  }
+  const scoreCell = (x: QuestionAvgRow | undefined) => x
+    ? (x.average_visible && x.avg_rating != null ? <ScoreChip v={Number(x.avg_rating)} /> : <span className="muted small" title="Below the minimum number of answers">hidden</span>)
+    : <span className="dt-empty">—</span>;
+  const qColumnsFor = <R,>(rowsQ: QuestionAvgRow[], cols: QCol[], idOf: (r: R) => number, field: 'session_id' | 'cohort_id'): Column<R>[] =>
+    cols.map((c) => ({
+      id: `q:${c.key}`, header: `${shortDim(c.dimension)} · v${c.version}`, title: `Q${c.question_id} v${c.version}: ${c.statement}`,
+      width: 128, align: 'center' as const,
+      value: (r: R) => { const x = cell(rowsQ, idOf(r), field, c); return x?.average_visible && x.avg_rating != null ? Number(x.avg_rating) : null; },
+      render: (r: R) => scoreCell(cell(rowsQ, idOf(r), field, c)),
+    }));
 
-  const header = (c: QCol) => (
-    <th key={c.key} title={`${c.dimension} (v${c.version}): ${c.statement}`}>
-      {shortDim(c.dimension)}<br /><span className="muted small">Q{c.question_id} · v{c.version}</span>
-    </th>
-  );
-
-  function exportCsv() {
-    const head = ['course', 'cohort', 'session', 'title', 'responses', ...sessionCols.map((c) => `${c.dimension} (Q${c.question_id} v${c.version})`), 'overall'];
-    const lines = sessions.map((r) => [r.course_name, r.cohort, r.session_number, r.title, r.response_count,
-      ...sessionCols.map((c) => cell(sessionQs, r.session_id, 'session_id', c)?.avg_rating ?? ''), r.overall_avg ?? '']);
-    const csv = [head, ...lines].map((l) => l.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    a.download = `feedback-summary-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-  }
+  const sessionColumns: Column<SessionSummaryRow>[] = [
+    { id: 'course', header: 'Course', width: 180, value: (r) => r.course_name },
+    { id: 'cohort', header: 'Cohort', width: 110, value: (r) => r.cohort },
+    { id: 'no', header: '#', width: 64, align: 'right', value: (r) => r.session_number },
+    { id: 'session', header: 'Session', width: 200, value: (r) => r.title },
+    { id: 'open', header: 'Feedback', width: 104, value: (r) => (r.feedback_open ? 'Open' : 'Closed') },
+    { id: 'n', header: 'Responses', width: 110, align: 'right', value: (r) => r.response_count },
+    ...qColumnsFor<SessionSummaryRow>(sessionQs, sessionCols, (r) => r.session_id, 'session_id'),
+    {
+      id: 'overall', header: 'Overall', width: 104, align: 'center',
+      value: (r) => (r.averages_visible && r.overall_avg != null ? Number(r.overall_avg) : null),
+      render: (r) => r.response_count > 0 && !r.averages_visible ? <span className="muted small">hidden</span> : r.overall_avg != null ? <ScoreChip v={Number(r.overall_avg)} strong /> : <span className="dt-empty">—</span>,
+    },
+  ];
+  const cohortColumns: Column<CohortSummaryRow>[] = [
+    { id: 'course', header: 'Course', width: 180, value: (r) => r.course_name },
+    { id: 'cohort', header: 'Cohort', width: 110, value: (r) => r.cohort },
+    { id: 'sessions', header: 'Sessions', width: 100, align: 'right', value: (r) => r.sessions_with_feedback },
+    { id: 'n', header: 'Responses', width: 110, align: 'right', value: (r) => r.response_count },
+    ...qColumnsFor<CohortSummaryRow>(cohortQs, cohortCols, (r) => r.cohort_id, 'cohort_id'),
+    {
+      id: 'overall', header: 'Overall', width: 104, align: 'center',
+      value: (r) => (r.averages_visible && r.overall_avg != null ? Number(r.overall_avg) : null),
+      render: (r) => !r.averages_visible ? <span className="muted small">hidden</span> : r.overall_avg != null ? <ScoreChip v={Number(r.overall_avg)} strong /> : <span className="dt-empty">—</span>,
+    },
+  ];
 
   return (
     <section>
-      <div className="toolbar">
-        <select value={cohortId} onChange={(e) => setCohortId(e.target.value === 'all' ? 'all' : Number(e.target.value))}>
-          <option value="all">All courses / cohorts</option>
-          {cohorts.map((c) => <option key={c.id} value={c.id}>{c.course_name} — {c.cohort}</option>)}
-        </select>
-        <button className="btn" onClick={exportCsv} disabled={!sessions.length}>Export CSV</button>
-      </div>
+      <FilterBar label="Summary filters">
+        <Field label="Course / cohort" inline>
+          <select value={cohortId} onChange={(e) => setCohortId(e.target.value === 'all' ? 'all' : Number(e.target.value))}>
+            <option value="all">All courses / cohorts</option>
+            {cohorts.map((c) => <option key={c.id} value={c.id}>{c.course_name} — {c.cohort}</option>)}
+          </select>
+        </Field>
+      </FilterBar>
       {error && <p className="error">{error}</p>}
       <p className="muted small">
         Averages appear once there are at least {minN} answers (change in Settings). Each question version has its own
-        column, so results are only compared on identical wording. Hover a column heading to see the exact statement.
+        column, so results are only compared on identical wording. Hover a column heading for the exact statement.
+        Comments are in the Feedback &amp; insights tab.
       </p>
-
       <h2>Per session</h2>
-      <div className="table-wrap">
-        <table className="data">
-          <thead>
-            <tr><th>Course / cohort</th><th>#</th><th>Session</th><th>n</th>{sessionCols.map(header)}<th>Overall</th><th></th></tr>
-          </thead>
-          <tbody>
-            {sessions.map((r) => (
-              <Fragment key={r.session_id}>
-                <tr>
-                  <td>{r.course_name}<br /><span className="muted small">{r.cohort}</span></td>
-                  <td>{r.session_number}</td>
-                  <td>{r.title} {r.feedback_open && <span className="pill open">open</span>}</td>
-                  <td>{r.response_count}</td>
-                  {sessionCols.map((c) => {
-                    const x = cell(sessionQs, r.session_id, 'session_id', c);
-                    return <Score key={c.key} v={x?.avg_rating ?? null} hidden={!!x && !x.average_visible} />;
-                  })}
-                  <Score v={r.overall_avg} hidden={r.response_count > 0 && !r.averages_visible} strong />
-                  <td>{r.response_count > 0 && <button className="link" onClick={() => toggleComments(r.session_id)}>{openComments === r.session_id ? 'Hide' : 'Comments'}</button>}</td>
-                </tr>
-                {openComments === r.session_id && (
-                  <tr className="comments-row">
-                    <td colSpan={sessionCols.length + 6}>
-                      {comments.length ? <ul className="comments">{comments.map((c, i) => <li key={i}>{c.comment}</li>)}</ul>
-                        : <span className="muted">No comments for this session.</span>}
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-            {!sessions.length && <tr><td colSpan={sessionCols.length + 6} className="muted">No sessions yet.</td></tr>}
-          </tbody>
-        </table>
-      </div>
-
+      <DataTable tableKey="summary-sessions" caption="Summary per session" columns={sessionColumns} rows={sessions}
+        rowKey={(r) => r.session_id} exportName="summary-by-session" emptyText="No sessions yet." viewStore={sessionViews} />
       <h2>Across courses / cohorts</h2>
-      <div className="table-wrap">
-        <table className="data">
-          <thead>
-            <tr><th>Course / cohort</th><th>Sessions</th><th>n</th>{cohortCols.map(header)}<th>Overall</th></tr>
-          </thead>
-          <tbody>
-            {cohortRows.map((r) => (
-              <tr key={r.cohort_id}>
-                <td>{r.course_name}<br /><span className="muted small">{r.cohort}</span></td>
-                <td>{r.sessions_with_feedback}</td>
-                <td>{r.response_count}</td>
-                {cohortCols.map((c) => {
-                  const x = cell(cohortQs, r.cohort_id, 'cohort_id', c);
-                  return <Score key={c.key} v={x?.avg_rating ?? null} hidden={!!x && !x.average_visible} />;
-                })}
-                <Score v={r.overall_avg} hidden={!r.averages_visible} strong />
-              </tr>
-            ))}
-            {!cohortRows.length && <tr><td colSpan={cohortCols.length + 4} className="muted">No responses yet.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      <DataTable tableKey="summary-cohorts" caption="Summary per cohort" columns={cohortColumns} rows={cohortRows}
+        rowKey={(r) => r.cohort_id} exportName="summary-by-cohort" emptyText="No responses yet." viewStore={cohortViews} />
     </section>
   );
 }
@@ -301,12 +268,10 @@ function shortDim(d: string) {
   return d.length > 14 ? d.split(/[\s(]/)[0] : d;
 }
 
-function Score({ v, hidden, strong }: { v: number | null; hidden?: boolean; strong?: boolean }) {
-  if (hidden) return <td className="muted small" title="Below the minimum number of answers">hidden</td>;
-  if (v == null) return <td className="muted">—</td>;
-  const n = Number(v);
-  const cls = n >= 4.2 ? 'good' : n >= 3.5 ? 'ok' : 'low';
-  return <td className={`score ${cls}`}>{strong ? <strong>{n.toFixed(2)}</strong> : n.toFixed(2)}</td>;
+function ScoreChip({ v, strong }: { v: number; strong?: boolean }) {
+  const cls = v >= 4.2 ? 'good' : v >= 3.5 ? 'ok' : 'low';
+  const word = cls === 'good' ? 'high' : cls === 'ok' ? 'medium' : 'low';
+  return <span className={`score-chip ${cls}`} title={`${v.toFixed(2)} (${word})`}>{strong ? <strong>{v.toFixed(2)}</strong> : v.toFixed(2)}</span>;
 }
 
 /* ----------------------------- Sessions ----------------------------- */
