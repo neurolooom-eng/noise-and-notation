@@ -1,6 +1,9 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import FeedbackFlow from './participant/FeedbackFlow';
 import { supabase, configError, friendlyError, type AppConfig } from './supabase';
+import RefreshButton, { cleanRefreshParam } from './RefreshButton';
+
+cleanRefreshParam();
 
 const Admin = lazy(() => import('./admin/Admin'));
 
@@ -15,6 +18,17 @@ function useHashRoute() {
 }
 
 export default function App() {
+  return (
+    <>
+      <div className="topbar">
+        <RefreshButton />
+      </div>
+      <Routes />
+    </>
+  );
+}
+
+function Routes() {
   const hash = useHashRoute();
   if (configError) return <Message title="Not configured" text={configError} />;
   if (hash.startsWith('#/admin')) {

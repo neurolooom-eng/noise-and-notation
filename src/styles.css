@@ -187,3 +187,18 @@ table.edit input:not([type=checkbox]) { min-height: 36px; padding: 6px 8px; min-
 .add-form .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 12px; }
 .add-form .btn.primary { width: auto; }
 .saved { color: var(--ok); font-style: normal; font-weight: 500; font-size: .85rem; }
+
+/* ---------- Force refresh ---------- */
+.topbar { display: flex; justify-content: flex-end; max-width: 1200px; margin: 0 auto; padding: 10px 16px 0; }
+.refresh-btn {
+  font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--brand-2); background: var(--card);
+  border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; min-height: 34px;
+}
+.refresh-btn:hover:not(:disabled) { border-color: var(--brand-2); }
+.refresh-btn:disabled { opacity: .7; cursor: progress; }
+.refresh-btn span { display: inline-block; font-size: 1rem; line-height: 1; }
+.refresh-btn .spin { animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .refresh-btn .spin { animation: none; } }
