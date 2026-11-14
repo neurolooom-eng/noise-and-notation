@@ -1,11 +1,11 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase, friendlyError } from '../supabase';
 import FeedbackTab from './FeedbackTab';
 import DesignTab from './DesignTab';
 import DataTable, { type Column } from '../ui/DataTable';
 import { useSavedViews } from '../ui/useSavedViews';
-import { FilterBar, Field } from '../ui/Form';
+import { FilterBar, Field, FormActions } from '../ui/Form';
 
 type Tab = 'feedback' | 'summary' | 'sessions' | 'courses' | 'questions' | 'settings' | 'design';
 
@@ -280,7 +280,9 @@ function SessionsTab({ cohorts }: { cohorts: CohortRow[] }) {
   const [cohortId, setCohortId] = useState<number | null>(null);
   const [rows, setRows] = useState<SessionRow[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [draft, setDraft] = useState({ session_number: '', title: '', session_date: '', topic: '', materials_url: '' });
+  const [notice, setNotice] = useState<string | null>(null);
+  const [draft, setDraft] = useState({ session_number: '', title: '', session_date: '', topic: '', materials_url: '', open: true });
+  const views = useSavedViews('sessions');
 
   useEffect(() => {
     if (cohortId == null && cohorts.length) setCohortId(cohorts[0].id);
@@ -299,15 +301,23 @@ function SessionsTab({ cohorts }: { cohorts: CohortRow[] }) {
     setDraft((d) => ({ ...d, session_number: String(next) }));
   }, [rows]);
 
+  const flash = (m: string) => { setNotice(m); window.setTimeout(() => setNotice(null), 3500); };
+
   async function patch(id: number, values: Partial<SessionRow>) {
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...values } : r)));
     const { error } = await supabase.from('sessions').update(values).eq('id', id);
-    if (error) { setError(friendlyError(error)); load(); }
+    if (error) { setError(friendlyError(error)); load(); return; }
+    if ('feedback_open' in values) {
+      const r = rows.find((x) => x.id === id);
+      flash(values.feedback_open
+        ? `Session ${r?.session_number} is now OPEN — participants in this course can give feedback.`
+        : `Session ${r?.session_number} is now CLOSED — participants can no longer see it.`);
+    }
   }
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
-    if (cohortId == null || !draft.title.trim()) return;
+    if (cohortId == null || !draft.title.trim()) return setError('Enter a title for the session.');
     const { error } = await supabase.from('sessions').insert({
       cohort_id: cohortId,
       session_number: Number(draft.session_number),
@@ -315,62 +325,80 @@ function SessionsTab({ cohorts }: { cohorts: CohortRow[] }) {
       session_date: draft.session_date || null,
       topic: draft.topic.trim() || null,
       materials_url: draft.materials_url.trim() || null,
+      feedback_open: draft.open,
     });
     if (error) return setError(friendlyError(error));
-    setDraft({ session_number: '', title: '', session_date: '', topic: '', materials_url: '' });
+    setError(null);
+    flash(draft.open
+      ? `Added session ${draft.session_number}. It is OPEN — participants can give feedback now.`
+      : `Added session ${draft.session_number}. It is CLOSED — switch it to Open when it's time for feedback.`);
+    setDraft({ session_number: '', title: '', session_date: '', topic: '', materials_url: '', open: true });
     load();
   }
+
+  const cohort = cohorts.find((c) => c.id === cohortId);
+  const closed = rows.filter((r) => !r.feedback_open);
+
+  const columns: Column<SessionRow>[] = [
+    { id: 'no', header: '#', width: 64, align: 'right', value: (r) => r.session_number },
+    { id: 'title', header: 'Title', width: 220, value: (r) => r.title,
+      render: (r) => <EditCell label={`Title for session ${r.session_number}`} value={r.title} onSave={(v) => v && patch(r.id, { title: v })} /> },
+    { id: 'date', header: 'Date', width: 160, value: (r) => r.session_date,
+      render: (r) => <input type="date" aria-label={`Date for session ${r.session_number}`} defaultValue={r.session_date ?? ''}
+        onBlur={(e) => e.target.value !== (r.session_date ?? '') && patch(r.id, { session_date: e.target.value || null })} /> },
+    { id: 'topic', header: 'Topic (shown to participants)', width: 280, value: (r) => r.topic,
+      render: (r) => <EditCell multiline label={`Topic for session ${r.session_number}`} value={r.topic ?? ''} onSave={(v) => patch(r.id, { topic: v || null })} /> },
+    { id: 'materials', header: 'Materials link', width: 220, value: (r) => r.materials_url,
+      render: (r) => <EditCell label={`Materials link for session ${r.session_number}`} value={r.materials_url ?? ''} onSave={(v) => patch(r.id, { materials_url: v || null })} /> },
+    { id: 'open', header: 'Feedback', width: 130, value: (r) => (r.feedback_open ? 'Open' : 'Closed'),
+      render: (r) => (
+        <label className="switch">
+          <input type="checkbox" checked={r.feedback_open} onChange={(e) => patch(r.id, { feedback_open: e.target.checked })} />
+          <span>{r.feedback_open ? 'Open' : 'Closed'}</span>
+        </label>
+      ) },
+  ];
 
   if (!cohorts.length) return <p className="muted">Add a course / cohort first (Courses tab).</p>;
 
   return (
     <section>
-      <div className="toolbar">
-        <select value={cohortId ?? ''} onChange={(e) => setCohortId(Number(e.target.value))}>
-          {cohorts.map((c) => <option key={c.id} value={c.id}>{c.course_name} — {c.cohort}{c.active ? '' : ' (inactive)'}</option>)}
-        </select>
-      </div>
+      <FilterBar label="Sessions filter">
+        <Field label="Course / cohort" inline>
+          <select value={cohortId ?? ''} onChange={(e) => setCohortId(Number(e.target.value))}>
+            {cohorts.map((c) => <option key={c.id} value={c.id}>{c.course_name} — {c.cohort}{c.active ? '' : ' (inactive)'}</option>)}
+          </select>
+        </Field>
+      </FilterBar>
       {error && <p className="error">{error}</p>}
-      <p className="muted small">Feedback opens and closes only when you toggle it. Edits save when you leave a field.</p>
-      <div className="table-wrap">
-        <table className="data edit">
-          <thead><tr><th>#</th><th>Title</th><th>Date</th><th>Topic (shown to participants)</th><th>Materials link</th><th>Feedback</th></tr></thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td>{r.session_number}</td>
-                <td><EditCell value={r.title} onSave={(v) => v && patch(r.id, { title: v })} /></td>
-                <td><input type="date" defaultValue={r.session_date ?? ''} onBlur={(e) => e.target.value !== (r.session_date ?? '') && patch(r.id, { session_date: e.target.value || null })} /></td>
-                <td><EditCell multiline label={`Topic for session ${r.session_number}`} value={r.topic ?? ''} onSave={(v) => patch(r.id, { topic: v || null })} /></td>
-                <td><EditCell value={r.materials_url ?? ''} onSave={(v) => patch(r.id, { materials_url: v || null })} /></td>
-                <td>
-                  <label className="switch">
-                    <input type="checkbox" checked={r.feedback_open} onChange={(e) => patch(r.id, { feedback_open: e.target.checked })} />
-                    <span>{r.feedback_open ? 'Open' : 'Closed'}</span>
-                  </label>
-                </td>
-              </tr>
-            ))}
-            {!rows.length && <tr><td colSpan={6} className="muted">No sessions in this cohort yet.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      {notice && <p className="notice" role="status">{notice}</p>}
+      {cohort && !cohort.active && (
+        <p className="notice-warn">● This course is inactive. <span>Participants can't see any of its sessions until you make it active again in the Courses tab.</span></p>
+      )}
+      {cohort?.active && rows.length > 0 && closed.length > 0 && (
+        <p className="notice-warn">
+          ● {closed.length === rows.length ? 'All sessions are' : `${closed.length} of ${rows.length} sessions are`} Closed.{' '}
+          <span>Participants only see sessions switched to <strong>Open</strong> — switch one on when it's time for feedback.</span>
+        </p>
+      )}
+      <p className="muted small">Edits save when you leave a field. Feedback opens and closes only when you switch it.</p>
+      <DataTable tableKey="sessions" caption="Sessions" columns={columns} rows={rows} rowKey={(r) => r.id}
+        exportName={`sessions-${cohort?.course_name ?? 'course'}`} emptyText="No sessions in this course yet — add one below." viewStore={views} />
 
-      <form className="card add-form" onSubmit={add}>
+      <form className="card add-form" onSubmit={add} noValidate>
         <h3>Add session</h3>
         <div className="grid">
-          <label className="field"><span>Number</span>
-            <input type="number" min={1} value={draft.session_number} onChange={(e) => setDraft({ ...draft, session_number: e.target.value })} required /></label>
-          <label className="field"><span>Title</span>
-            <input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} required /></label>
-          <label className="field"><span>Date</span>
-            <input type="date" value={draft.session_date} onChange={(e) => setDraft({ ...draft, session_date: e.target.value })} /></label>
-          <label className="field"><span>Topic</span>
-            <input value={draft.topic} onChange={(e) => setDraft({ ...draft, topic: e.target.value })} /></label>
-          <label className="field"><span>Materials link</span>
-            <input type="url" value={draft.materials_url} onChange={(e) => setDraft({ ...draft, materials_url: e.target.value })} /></label>
+          <Field label="Number" required><input type="number" min={1} value={draft.session_number} onChange={(e) => setDraft({ ...draft, session_number: e.target.value })} /></Field>
+          <Field label="Title" required><input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></Field>
+          <Field label="Date"><input type="date" value={draft.session_date} onChange={(e) => setDraft({ ...draft, session_date: e.target.value })} /></Field>
+          <Field label="Topic" hint="Shown to participants above the questions."><input value={draft.topic} onChange={(e) => setDraft({ ...draft, topic: e.target.value })} /></Field>
+          <Field label="Materials link"><input type="url" value={draft.materials_url} onChange={(e) => setDraft({ ...draft, materials_url: e.target.value })} /></Field>
         </div>
-        <button className="btn primary">Add session</button>
+        <label className="check-field">
+          <input type="checkbox" checked={draft.open} onChange={(e) => setDraft({ ...draft, open: e.target.checked })} />
+          <span><strong>Open for feedback now</strong><span className="muted small">Untick to add it closed and open it later. Participants only see open sessions.</span></span>
+        </label>
+        <FormActions><button className="btn primary" style={{ width: 'auto' }}>Add session</button></FormActions>
       </form>
     </section>
   );
@@ -396,49 +424,68 @@ function CoursesTab({ cohorts, reload }: { cohorts: CohortRow[]; reload: () => v
   const [course, setCourse] = useState('');
   const [cohort, setCohort] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [counts, setCounts] = useState<Record<number, { open: number; total: number }>>({});
   const courseNames = useMemo(() => [...new Set(cohorts.map((c) => c.course_name))], [cohorts]);
+  const views = useSavedViews('courses');
+
+  useEffect(() => {
+    supabase.from('sessions').select('cohort_id,feedback_open').then(({ data }) => {
+      const m: Record<number, { open: number; total: number }> = {};
+      (data as { cohort_id: number; feedback_open: boolean }[] | null)?.forEach((s) => {
+        m[s.cohort_id] ??= { open: 0, total: 0 };
+        m[s.cohort_id].total++;
+        if (s.feedback_open) m[s.cohort_id].open++;
+      });
+      setCounts(m);
+    });
+  }, [cohorts]);
 
   async function add(e: React.FormEvent) {
     e.preventDefault();
+    if (!course.trim() || !cohort.trim()) return setError('Enter a course name and a cohort.');
     const { error } = await supabase.from('cohorts').insert({ course_name: course.trim(), cohort: cohort.trim() });
     if (error) return setError(friendlyError(error));
     setCourse(''); setCohort(''); setError(null); reload();
   }
-  async function toggle(id: number, active: boolean) {
-    const { error } = await supabase.from('cohorts').update({ active }).eq('id', id);
+  async function patch(id: number, values: Partial<CohortRow>) {
+    const { error } = await supabase.from('cohorts').update(values).eq('id', id);
     if (error) setError(friendlyError(error));
     reload();
   }
+
+  const columns: Column<CohortRow>[] = [
+    { id: 'course', header: 'Course', width: 240, value: (r) => r.course_name,
+      render: (r) => <EditCell label={`Course name for ${r.course_name} ${r.cohort}`} value={r.course_name} onSave={(v) => v && patch(r.id, { course_name: v })} /> },
+    { id: 'cohort', header: 'Cohort', width: 160, value: (r) => r.cohort,
+      render: (r) => <EditCell label={`Cohort for ${r.course_name}`} value={r.cohort} onSave={(v) => v && patch(r.id, { cohort: v })} /> },
+    { id: 'sessions', header: 'Sessions', width: 110, align: 'right', value: (r) => counts[r.id]?.total ?? 0 },
+    { id: 'open', header: 'Open now', width: 110, align: 'right', value: (r) => counts[r.id]?.open ?? 0 },
+    { id: 'active', header: 'Active', width: 120, value: (r) => (r.active ? 'Yes' : 'No'),
+      render: (r) => (
+        <label className="switch">
+          <input type="checkbox" checked={r.active} onChange={(e) => patch(r.id, { active: e.target.checked })} />
+          <span>{r.active ? 'Yes' : 'No'}</span>
+        </label>
+      ) },
+  ];
 
   return (
     <section>
       {error && <p className="error">{error}</p>}
       <p className="muted small">Each run of a course is a separate cohort, so runs can be compared. Inactive cohorts are hidden from participants.</p>
-      <div className="table-wrap">
-        <table className="data">
-          <thead><tr><th>Course</th><th>Cohort</th><th>Active</th></tr></thead>
-          <tbody>
-            {cohorts.map((c) => (
-              <tr key={c.id}>
-                <td>{c.course_name}</td><td>{c.cohort}</td>
-                <td><label className="switch"><input type="checkbox" checked={c.active} onChange={(e) => toggle(c.id, e.target.checked)} /><span>{c.active ? 'Yes' : 'No'}</span></label></td>
-              </tr>
-            ))}
-            {!cohorts.length && <tr><td colSpan={3} className="muted">No courses yet.</td></tr>}
-          </tbody>
-        </table>
-      </div>
-      <form className="card add-form" onSubmit={add}>
+      <DataTable tableKey="courses" caption="Courses and cohorts" columns={columns} rows={cohorts} rowKey={(r) => r.id}
+        exportName="courses" emptyText="No courses yet — add one below." viewStore={views}
+        rowClassName={(r) => (r.active ? '' : 'inactive-row')} />
+      <form className="card add-form" onSubmit={add} noValidate>
         <h3>Add course / cohort</h3>
         <div className="grid">
-          <label className="field"><span>Course name</span>
-            <input list="course-names" value={course} onChange={(e) => setCourse(e.target.value)} required />
-            <datalist id="course-names">{courseNames.map((n) => <option key={n} value={n} />)}</datalist>
-          </label>
-          <label className="field"><span>Cohort (e.g. 2026-Jan)</span>
-            <input value={cohort} onChange={(e) => setCohort(e.target.value)} required /></label>
+          <Field label="Course name" required hint="Pick an existing name for a repeat run.">
+            <input list="course-names" value={course} onChange={(e) => setCourse(e.target.value)} />
+          </Field>
+          <Field label="Cohort" required hint="e.g. 2026-Jan"><input value={cohort} onChange={(e) => setCohort(e.target.value)} /></Field>
         </div>
-        <button className="btn primary">Add</button>
+        <datalist id="course-names">{courseNames.map((n) => <option key={n} value={n} />)}</datalist>
+        <FormActions><button className="btn primary" style={{ width: 'auto' }}>Add</button></FormActions>
       </form>
     </section>
   );
@@ -462,6 +509,7 @@ function QuestionsTab() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [draft, setDraft] = useState({ dimension: '', statement: '', scale_min: '1', scale_max: '5' });
+  const qViews = useSavedViews('questions');
 
   const load = useCallback(async () => {
     const { data, error } = await supabase.from('questions').select('*').order('position').order('id');
@@ -522,6 +570,38 @@ function QuestionsTab() {
   }
 
   const active = rows.filter((q) => q.active).length;
+  const qColumns: Column<QuestionRow>[] = [
+    { id: 'order', header: 'Order', width: 104, value: (q) => q.position,
+      render: (q) => { const i = rows.findIndex((r) => r.id === q.id); return (
+        <span className="nowrap">
+          <button className="icon-btn" aria-label={`Move ${q.dimension} up`} disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
+          <button className="icon-btn" aria-label={`Move ${q.dimension} down`} disabled={i === rows.length - 1} onClick={() => move(i, 1)}>↓</button>
+        </span>
+      ); } },
+    { id: 'id', header: 'ID', width: 72, value: (q) => `Q${q.id}` },
+    { id: 'dimension', header: 'Dimension', width: 180, value: (q) => q.dimension,
+      render: (q) => <EditCell multiline label={`Dimension for Q${q.id}`} value={q.dimension} onSave={(v) => v && patch(q, { dimension: v }, `Change dimension to "${v}"?`)} /> },
+    { id: 'statement', header: 'Statement', width: 360, value: (q) => q.statement,
+      render: (q) => <EditCell multiline label={`Statement for Q${q.id}`} value={q.statement} onSave={(v) => v && patch(q, { statement: v }, `Change the statement to:\n"${v}"?`)} /> },
+    { id: 'scale', header: 'Scale', width: 150, value: (q) => `${q.scale_min}–${q.scale_max}`,
+      render: (q) => <ScaleCell q={q} onSave={(min, max) => patch(q, { scale_min: min, scale_max: max }, `Change the scale to ${min}–${max}?`)} /> },
+    { id: 'active', header: 'Active', width: 124, value: (q) => (q.active ? 'Active' : 'Inactive'),
+      render: (q) => (
+        <label className="switch">
+          <input type="checkbox" checked={q.active}
+            onChange={(e) => patch(q, { active: e.target.checked }, e.target.checked
+              ? `Make "${q.dimension}" active again? It will appear on the feedback form.`
+              : `Make "${q.dimension}" inactive? It will no longer appear on the feedback form.`)} />
+          <span>{q.active ? 'Active' : 'Inactive'}</span>
+        </label>
+      ) },
+    { id: 'version', header: 'Version', width: 96, value: (q) => q.version, render: (q) => <strong>v{q.version}</strong> },
+    { id: 'history', header: 'History', width: 120, value: () => null,
+      render: (q) => (
+        <button className="link" aria-expanded={openHistory === q.id} aria-label={`${openHistory === q.id ? 'Hide' : 'Show'} history of Q${q.id}`}
+          onClick={() => toggleHistory(q.id)}>{openHistory === q.id ? 'Hide history' : 'Show history'}</button>
+      ) },
+  ];
 
   return (
     <section>
@@ -531,66 +611,40 @@ function QuestionsTab() {
         {active} active question{active === 1 ? '' : 's'} on the feedback form. {BUMP_NOTE} Inactive questions are hidden
         from participants but kept with their answers.
       </p>
-      <div className="table-wrap">
-        <table className="data edit">
-          <thead>
-            <tr><th>Order</th><th>ID</th><th>Dimension</th><th>Statement</th><th>Scale</th><th>Active</th><th>Version</th><th></th></tr>
-          </thead>
-          <tbody>
-            {rows.map((q, i) => (
-              <Fragment key={q.id}>
-                <tr className={q.active ? '' : 'inactive-row'}>
-                  <td className="nowrap">
-                    <button className="icon-btn" aria-label={`Move ${q.dimension} up`} disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
-                    <button className="icon-btn" aria-label={`Move ${q.dimension} down`} disabled={i === rows.length - 1} onClick={() => move(i, 1)}>↓</button>
-                  </td>
-                  <td>Q{q.id}</td>
-                  <td><EditCell multiline label={`Dimension for Q${q.id}`} value={q.dimension} onSave={(v) => v && patch(q, { dimension: v }, `Change dimension to "${v}"?`)} /></td>
-                  <td className="wide-cell"><EditCell multiline label={`Statement for Q${q.id}`} value={q.statement} onSave={(v) => v && patch(q, { statement: v }, `Change the statement to:\n"${v}"?`)} /></td>
-                  <td className="nowrap">
-                    <ScaleCell q={q} onSave={(min, max) => patch(q, { scale_min: min, scale_max: max }, `Change the scale to ${min}–${max}?`)} />
-                  </td>
-                  <td>
-                    <label className="switch">
-                      <input type="checkbox" checked={q.active}
-                        onChange={(e) => patch(q, { active: e.target.checked }, e.target.checked
-                          ? `Make "${q.dimension}" active again? It will appear on the feedback form.`
-                          : `Make "${q.dimension}" inactive? It will no longer appear on the feedback form.`)} />
-                      <span>{q.active ? 'Active' : 'Inactive'}</span>
-                    </label>
-                  </td>
-                  <td><strong>v{q.version}</strong></td>
-                  <td><button className="link" onClick={() => toggleHistory(q.id)}>{openHistory === q.id ? 'Hide history' : 'History'}</button></td>
-                </tr>
-                {openHistory === q.id && (
-                  <tr className="comments-row">
-                    <td colSpan={8}>
-                      <table className="history">
-                        <thead><tr><th>Version</th><th>When</th><th>By</th><th>Dimension</th><th>Statement</th><th>Scale</th><th>Active</th><th>Order</th></tr></thead>
-                        <tbody>
-                          {(history[q.id] ?? []).map((h) => (
-                            <tr key={h.version}>
-                              <td>v{h.version}</td>
-                              <td className="nowrap">{new Date(h.changed_at).toLocaleString()}</td>
-                              <td>{h.changed_by ?? '—'}</td>
-                              <td>{h.dimension}</td>
-                              <td>{h.statement}</td>
-                              <td>{h.scale_min}–{h.scale_max}</td>
-                              <td>{h.active ? 'Yes' : 'No'}</td>
-                              <td>{h.position}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </td>
+      <DataTable
+        tableKey="questions"
+        caption="Questions"
+        columns={qColumns}
+        rows={rows}
+        rowKey={(q) => q.id}
+        exportName="questions"
+        emptyText="No questions yet."
+        viewStore={qViews}
+        rowClassName={(q) => (q.active ? '' : 'inactive-row')}
+        expandedKey={openHistory}
+        renderExpanded={(q) => (
+          <div className="history-wrap">
+            <h4>Version history — Q{q.id}</h4>
+            <table className="history">
+              <thead><tr><th>Version</th><th>When</th><th>By</th><th>Dimension</th><th>Statement</th><th>Scale</th><th>Active</th><th>Order</th></tr></thead>
+              <tbody>
+                {(history[q.id] ?? []).map((h) => (
+                  <tr key={h.version}>
+                    <td>v{h.version}</td>
+                    <td className="nowrap">{new Date(h.changed_at).toLocaleString()}</td>
+                    <td>{h.changed_by ?? '—'}</td>
+                    <td>{h.dimension}</td>
+                    <td>{h.statement}</td>
+                    <td>{h.scale_min}–{h.scale_max}</td>
+                    <td>{h.active ? 'Yes' : 'No'}</td>
+                    <td>{h.position}</td>
                   </tr>
-                )}
-              </Fragment>
-            ))}
-            {!rows.length && <tr><td colSpan={8} className="muted">No questions yet.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      />
 
       <form className="card add-form" onSubmit={add}>
         <h3>Add a question</h3>
